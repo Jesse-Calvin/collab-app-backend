@@ -1,60 +1,39 @@
-import json
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket
+from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
 
-# Allow all origins for now (can restrict later)
+# Allow frontend access
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-clients = []
-strokes = []  # Store all strokes in memory
+connections = []
+
+@app.get("/")
+def read_root():
+    return {"message": "Collaborative Drawing App"}
 
 @app.websocket("/ws")
-async def websocket_endpoint(ws: WebSocket):
-    await ws.accept()
-    clients.append(ws)
-
-    # Send existing strokes to new client
-    await ws.send_text(json.dumps({"type": "init", "strokes": strokes}))
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    print("✅ New client connected")
+    connections.append(websocket)
 
     try:
         while True:
-            data = await ws.receive_text()
-            msg = json.loads(data)
-
-            if msg["type"] == "start":
-                current_stroke = [{"x": msg["x"], "y": msg["y"], "color": msg["color"]}]
-                strokes.append(current_stroke)
-                await broadcast(msg)
-
-            elif msg["type"] == "draw":
-                if strokes:
-                    strokes[-1].append({"x": msg["x"], "y": msg["y"], "color": msg["color"]})
-                await broadcast(msg)
-
-            elif msg["type"] == "endStroke":
-                await broadcast(msg)
-
-            elif msg["type"] == "clear":
-                strokes.clear()
-                await broadcast({"type": "clear"})
-
-            elif msg["type"] == "undo":
-                if strokes:
-                    strokes.pop()
-                await broadcast({"type": "undo", "strokes": strokes})
-
-    except WebSocketDisconnect:
-        clients.remove(ws)
-
-async def broadcast(message):
-    """Send message to all connected clients."""
-    for client in clients:
-        await client.send_text(json.dumps(message))
+            data = await websocket.receive_text()
+            print("📨 Received from client:", data)
+            for conn in connections:
+                if conn != websocket:
+                    print("➡️ Sending to another client")
+                    await conn.send_text(data)
+    except Exception as e:
+        print("❌ WebSocket error:", e)
+    finally:
+        connections.remove(websocket)
+        print("👋 Client disconnected")
